@@ -1149,6 +1149,11 @@ class MSLDAPClient:
 		except Exception as e:
 			return False, e
 
+	async def whoami(self):
+		result, err = await self._con.whoami()
+		if not err:
+			return result
+
 	#async def get_permissions_for_dn(self, dn):
 	#	"""
 	#	Lists all users who can modify the specified dn
