@@ -7,7 +7,7 @@ from msldap.protocol.messages import LDAPMessage, BindRequest, \
     protocolOp, AuthenticationChoice, SaslCredentials, \
     SearchRequest, AttributeDescription, Filter, Filters, \
     Controls, Control, SearchControlValue, AddRequest, \
-    ModifyRequest, DelRequest, ExtendedRequest
+    ModifyRequest, DelRequest, ExtendedRequest, ExtendedResponse
 
 from msldap.protocol.utils import calcualte_length
 from msldap.protocol.typeconversion import convert_result, convert_attributes, encode_attributes, encode_changes
@@ -23,12 +23,13 @@ from hashlib import sha256
 from minikerberos.gssapi.channelbindings import ChannelBindingsStruct
 
 class MSLDAPClientConnection:
-    def __init__(self, target, creds):
-        if target is None:
-            raise Exception('Target cant be none!')
+    def __init__(self, target, creds, auth=None):
         self.target = target
         self.creds = creds
-        self.auth = AuthenticatorBuilder(self.creds, self.target).build()
+        if auth is not None:
+            self.auth = auth
+        else:
+            self.auth = AuthenticatorBuilder(self.creds, self.target).build()
         self.connected = False
         self.bind_ok = False
         self.__sign_messages = False
@@ -55,6 +56,9 @@ class MSLDAPClientConnection:
         try:
             while True:
                 message_data, err = await self.network.in_queue.get()
+                if message_data is None and err is None:
+                    return
+
                 if err is not None:
                     logger.debug('Client terminating bc __handle_incoming got an error!')
                     raise err
@@ -207,10 +211,15 @@ class MSLDAPClientConnection:
 
         logger.debug('Disconnecting!')
         self.bind_ok = False
-        if self.handle_incoming_task is not None:
-            self.handle_incoming_task.cancel()
+        await self.network.in_queue.put((None,None))
+        await self.network.out_queue.put(None)
+        await asyncio.sleep(0)
+        
         if self.network is not None:
             await self.network.terminate()
+        
+        if self.handle_incoming_task is not None:
+            self.handle_incoming_task.cancel()
 
 
     def __bind_success(self):
@@ -420,6 +429,7 @@ class MSLDAPClientConnection:
             else:
                 raise Exception('Not implemented authentication method: %s' % self.creds.auth_method.name)
         except Exception as e:
+            await self.disconnect()
             return False, e
 
     async def add(self, entry, attributes):
@@ -705,6 +715,29 @@ class MSLDAPClientConnection:
         except Exception as e:
             yield (None, e)
 
+    async def whoami(self):
+        if self.status != MSLDAPClientStatus.RUNNING:
+            return None, Exception('Connection not running! Probably encountered an error')
+        
+        ext = {
+            'requestName': b'1.3.6.1.4.1.4203.1.11.3',
+        }
+        br = { 'extendedReq' : ExtendedRequest(ext)}
+        msg = { 'protocolOp' : protocolOp(br)}
+
+        msg_id = await self.send_message(msg)
+        res = await self.recv_message(msg_id)
+        res = res[0]
+        if isinstance(res, Exception):
+            return None, res
+        if res.native['protocolOp']['resultCode'] != 'success':
+            return False, LDAPBindException(
+                    res['protocolOp']['resultCode'], 
+                    res['protocolOp']['diagnosticMessage']
+                )
+        return res.native['protocolOp']['responseValue'].decode(), None
+        
+
 
     async def get_serverinfo(self):
         if self.status != MSLDAPClientStatus.RUNNING:
@@ -748,30 +781,10 @@ class MSLDAPClientConnection:
         res = res[0]
         if isinstance(res, Exception):
             return None, res
-
-        return convert_attributes(res.native['protocolOp']['attributes']), None
-
-    async def whoami(self):
-        if self.status != MSLDAPClientStatus.RUNNING:
-            return None, Exception('Connection not running! Probably encountered an error')
-
-        searchreq = {
-            'requestName': b'1.3.6.1.4.1.4203.1.11.3'
-        }
-
-        br = {'extendedReq': ExtendedRequest(searchreq)}
-        msg = {'protocolOp': protocolOp(br)}
-
-        msg_id = await self.send_message(msg)
-        res = await self.recv_message(msg_id)
-        # res = res[0]
-        res = res[0].native['protocolOp']['responseValue']
-
-        if b'u:' in res:
-            return res.decode().split(':')[1], None
-        else:
-            return res, True
         
+        #print('res')
+        #print(res)
+        return convert_attributes(res.native['protocolOp']['attributes']), None
 
 
 async def amain():

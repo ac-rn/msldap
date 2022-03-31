@@ -10,6 +10,7 @@ import hashlib
 import getpass
 import base64
 import enum
+import copy
 from urllib.parse import urlparse, parse_qs
 
 from msldap.commons.credential import MSLDAPCredential, LDAPAuthProtocol, MSLDAP_KERBEROS_PROTOCOLS
@@ -93,7 +94,9 @@ class MSLDAPURLDecoder:
 	ldap://TEST\\victim:password@10.10.10.2/DC=test,DC=corp/?timeout=99&proxytype=socks5&proxyhost=127.0.0.1&proxyport=1080&proxytimeout=44
 	"""
 	
-	def __init__(self, url):
+	def __init__(self, url, credential:MSLDAPCredential = None, target:MSLDAPTarget = None ):
+		self.credential = credential
+		self.target = target
 		self.url = url
 		self.ldap_scheme = None
 		self.auth_scheme = None
@@ -104,6 +107,8 @@ class MSLDAPURLDecoder:
 		self.encrypt = False
 		self.auth_settings = {}
 		self.etypes = None
+		self.altname = None
+		self.altdomain = None
 
 		self.ldap_proto = None
 		self.ldap_host = None
@@ -118,7 +123,8 @@ class MSLDAPURLDecoder:
 
 		self.__pwpreprocess = None
 
-		self.parse()
+		if url is not None:
+			self.parse()
 
 
 	def get_credential(self):
@@ -128,12 +134,16 @@ class MSLDAPURLDecoder:
 		:return: Credential object
 		:rtype: :class:`MSLDAPCredential`
 		"""
+		if self.credential is not None:
+			return copy.deepcopy(self.credential)
 		t = MSLDAPCredential(
 			domain=self.domain, 
 			username=self.username, 
 			password = self.password, 
 			auth_method=self.auth_scheme, 
-			settings = self.auth_settings
+			settings = self.auth_settings,
+			altname=self.altname,
+			altdomain=self.altdomain
 		)
 		t.encrypt = self.encrypt
 		t.etypes = self.etypes
@@ -147,6 +157,9 @@ class MSLDAPURLDecoder:
 		:return: Target object
 		:rtype: :class:`MSLDAPTarget`
 		"""
+		if self.target is not None:
+			return copy.deepcopy(self.target)
+
 		target = MSLDAPTarget(
 			self.ldap_host, 
 			port = self.ldap_port, 
@@ -161,6 +174,20 @@ class MSLDAPURLDecoder:
 		target.proxy = self.proxy
 		target.serverip = self.serverip
 		return target
+	
+	def __str__(self):
+		t = '==== MSLDAPURLDecoder ====\r\n'
+		for k in self.__dict__:
+			val = self.__dict__[k]
+			if isinstance(val, enum.IntFlag):
+				val = val
+			elif isinstance(val, enum.Enum):
+				val = val.name
+			
+			t += '%s: %s\r\n' % (k, str(val))
+			
+		return t
+
 
 	def get_client(self):
 		"""
@@ -343,6 +370,10 @@ class MSLDAPURLDecoder:
 					self.target_ratelimit = float(query[k][0])
 				elif k == 'pagesize':
 					self.target_pagesize = int(query[k][0])
+				elif k == 'altname':
+					self.altname = query[k][0]
+				elif k == 'altdomain':
+					self.altdomain = query[k][0]
 				#elif k.startswith('same'):
 				#	self.auth_settings[k[len('same'):]] = query[k]
 

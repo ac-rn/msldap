@@ -47,13 +47,15 @@ setup(
 		"Operating System :: OS Independent",
 	),
 	install_requires=[
-		'asn1crypto',
+		'unicrypto>=0.0.5',
+		'asn1crypto>=1.3.0',
+		'asysocks>=0.1.7',
+		'minikerberos>=0.2.20',
 		'winsspi>=0.0.9;platform_system=="Windows"',
-		'minikerberos>=0.2.14',
-		'asysocks>=0.1.1',
-		'winacl>=0.1.1',
+		'winacl>=0.1.2',
 		'prompt-toolkit>=3.0.2',
 		'tqdm',
+		'wcwidth',
 	],
 	entry_points={
 		'console_scripts': [
